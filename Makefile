@@ -2,8 +2,8 @@ CFLAGS = -Wall -ansi -pedantic
 PORT=5656
 
 all:
-	gcc server.c -o server.o
-	gcc client.c -o client.o
+	gcc -ggdb server.c -o server.o -lpthread
+	gcc -ggdb client.c -o client.o -lpthread
 
 clean:
 	rm -f *.o

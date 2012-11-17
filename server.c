@@ -138,9 +138,9 @@ int pop_queue()
 {
     if (queue.end != queue.start)
     {
-        if (--queue.end < 0)
-            queue.end += MAX_QUEUE;
-        return queue.fds[queue.end];
+        int toR = queue.fds[queue.start];
+        queue.start = (queue.start + 1) % MAX_QUEUE;
+        return toR;
     }
     return -1;    // smarter stuff plz
 }

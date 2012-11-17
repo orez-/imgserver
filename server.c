@@ -79,11 +79,6 @@ void *run()
         {   // actual stuff
             bzero(client->in_buffer, 256);
             memcpy(client->in_buffer, "imgs/", 5);
-            // buffer[0] = 'i';
-            // buffer[1] = 'm';
-            // buffer[2] = 'g';
-            // buffer[3] = 's';
-            // buffer[4] = '/';
             n = read(client->sockfd, client->in_buffer + 5, 250);
             if (!n)    // guy quit
             {
@@ -165,7 +160,7 @@ int main(int argc, char *argv[])
     }
 
     sem_init(&my_sem, 1, 0);
-    init_pthread_army();    // this ought to be pthreaded
+    init_pthread_army();    // TODO: this ought to be pthreaded
     init_queue();
 
     portno = atoi(argv[1]);
@@ -196,7 +191,7 @@ int main(int argc, char *argv[])
         }
 
         pthread_mutex_lock(&queue.mutex);
-        push_queue(newsockfd);
+        push_queue(newsockfd);    // TODO: we should block if there's no room in the queue
         pthread_mutex_unlock(&queue.mutex);
         sem_post(&my_sem);
     }

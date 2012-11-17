@@ -16,13 +16,14 @@ sem_t my_sem;
 pthread_t threads[MAX_THREADS];
 queue_t queue;
 
-void init_pthread_army()
+void *init_pthread_army()
 {
     int i;
+    printf("Initializing pthreads... \n");
     for (i = 0; i < MAX_THREADS; i++)
-    {
         pthread_create(&(threads[i]), NULL, run, NULL);
-    }
+    printf("Done.\n");
+    pthread_exit(0);
 }
 
 char *trimwhitespace(char *str)
@@ -152,6 +153,7 @@ int main(int argc, char *argv[])
     char buffer[256];
     struct sockaddr_in serv_addr, cli_addr;
     int n;
+    pthread_t init_thread;
     client_t *client;
 
     if (argc < 2) {
@@ -160,7 +162,7 @@ int main(int argc, char *argv[])
     }
 
     sem_init(&my_sem, 1, 0);
-    init_pthread_army();    // TODO: this ought to be pthreaded
+    pthread_create(&init_thread, NULL, init_pthread_army, NULL);
     init_queue();
 
     portno = atoi(argv[1]);
@@ -172,11 +174,9 @@ int main(int argc, char *argv[])
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_addr.s_addr = INADDR_ANY;
     serv_addr.sin_port = htons(portno);
-    if (bind(sockfd, (struct sockaddr *) &serv_addr,
-            sizeof(serv_addr)) < 0)
+    if (bind(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0)
         error("ERROR on binding");
     listen(sockfd, 5);
-    printf("You listened!\n");
     clilen = sizeof(cli_addr);
 
     while (1)

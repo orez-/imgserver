@@ -13,6 +13,21 @@ void error(const char *msg)
     exit(0);
 }
 
+char *trimwhitespace(char *str)
+{
+    char *end;
+    // Trim leading space
+    while(isspace(*str)) str++;
+    if(*str == 0)  // All spaces?
+    return str;
+    // Trim trailing space
+    end = str + strlen(str) - 1;
+    while(end > str && isspace(*end)) end--;
+    // Write new null terminator
+    *(end+1) = 0;
+    return str;
+}
+
 int main(int argc, char *argv[])
 {
     int sockfd, portno, n;
@@ -44,10 +59,12 @@ int main(int argc, char *argv[])
     printf("Please enter the message: ");
     bzero(buffer,256);
     fgets(buffer,255,stdin);
+
+    trimwhitespace(buffer);
     n = write(sockfd,buffer,strlen(buffer));
     if (n < 0) 
         error("ERROR writing to socket");
-    FILE *file = fopen("cat.jpg", "w");
+    FILE *file = fopen(buffer, "w");
     if (file == NULL)
     {
         printf("Couldn't open dat file\n");
@@ -66,7 +83,7 @@ int main(int argc, char *argv[])
             fputc(buffer[i], file);
         if (n < 256)
             break;
-        printf("%s\n",buffer);
+        // printf("%s\n",buffer);
     }
     fclose(file);
     close(sockfd);

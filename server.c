@@ -10,13 +10,11 @@
 #include <pthread.h>
 #include <semaphore.h>
 #include "server.h"
-#include <errno.h>
 
 sem_t my_sem;
 
 pthread_t threads[MAX_THREADS];
 queue_t queue;
-int * errno_p;
 
 void init_pthread_army()
 {
@@ -154,7 +152,6 @@ int pop_queue()
 
 int main(int argc, char *argv[])
 {
-    errno_p = __errno_location();
     int sockfd, newsockfd, portno;
     socklen_t clilen;
     char buffer[256];

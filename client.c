@@ -484,6 +484,7 @@ int main(int argc, char **argv) {
         remain -= buffer->used;
         buffer->used = 0;
       }
+      fprintf(stderr,"'%s' [%ld/%ld] (%ld%%)", linebuf, (long)total, (long)filesize, (long)(100*total)/filesize);
       while (remain > 0) {
         read = recv(sockfd, filebuf, chunk, 0);
         if (read == -1) {

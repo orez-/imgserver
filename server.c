@@ -388,17 +388,11 @@ void *executor_thread(void *task) {
       return NULL;
     }
     pthread_cleanup_push(handle_cleanup, (void *)ci);
-    if (adaptive_f)
-      expectMe(); /* Don't prematurely fire next wave */
     for (;;) {
       if (pool.shutdown) {
         executor_thread_shutdown(t);
         pthread_exit(NULL);
         return NULL;
-      }
-      if (adaptive_f) {
-        /* Wait yo turn */
-        scheduleMe(t->cid);
       }
       /* Get client input */
       memset(ci->buffer, 0, BUFFER_SIZE);
@@ -482,6 +476,10 @@ void *executor_thread(void *task) {
           pthread_exit(NULL);
           return NULL;
         }
+        if (adaptive_f) {
+          /* Wait yo turn to transmit file data */
+          scheduleMe(t->cid);
+        }
         ci->remain = ci->st.st_size;
         ci->offset = 0;
         ssize_t sent;
@@ -501,10 +499,10 @@ void *executor_thread(void *task) {
           }
         }
         fclose(ci->file);
+        if (adaptive_f) /* Report back in */
+          unexpectMe();
       }
     }
-    if (adaptive_f)
-      unexpectMe();
     close(t->socketfd);
     efree(ci);
     pthread_cleanup_pop(0);
@@ -687,24 +685,28 @@ static void expectMe() {
 }
 
 static void unexpectMe() {
-  /* I won't be back */
+  /* I'm done */
   int release;
   pthread_mutex_lock(&(adaptive_d.lock));
   --adaptive_d.released;
   release = sched_checkrelease();
   pthread_mutex_unlock(&(adaptive_d.lock));
+  /* Release next group */
   switch (release) {
     case 0:
+      verbose("Adaptive: Releasing high priority clients");
       pthread_mutex_lock(&(adaptive_d.high_l));
       pthread_cond_broadcast(&(adaptive_d.high_n));
       pthread_mutex_unlock(&(adaptive_d.high_l));
       break;
     case 1:
+      verbose("Adaptive: Releasing med priority clients");
       pthread_mutex_lock(&(adaptive_d.med_l));
       pthread_cond_broadcast(&(adaptive_d.med_n));
       pthread_mutex_unlock(&(adaptive_d.med_l));
       break;
     case 2:
+      verbose("Adaptive: Releasing low priority clients");
       pthread_mutex_lock(&(adaptive_d.low_l));
       pthread_cond_broadcast(&(adaptive_d.low_n));
       pthread_mutex_unlock(&(adaptive_d.low_l));
@@ -720,7 +722,7 @@ static void scheduleMe(int cid) {
   i = getClientpriIndById(cid);
   if (i == -1)
     i = adaptive_d.num_clients; /* lowest priority for clients who have not checked in with adaptive server */
-  ++adaptive_d.returned; /* Check in */
+  // ++adaptive_d.returned; /* Check in */
   
   /* Sorting hat */
   if (i < adaptive_d.high_t) {

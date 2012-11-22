@@ -1,15 +1,14 @@
-CFLAGS = -Wall -ansi -pedantic
-PORT=5656
+# Second one for gdb debugging
+CC = gcc
+# CC = gcc -g -O0
 
-all:
-	gcc -ggdb server.c -o server.o -lpthread
-	gcc -ggdb client.c -o client.o -lpthread
+all: clean server client
+
+server:	server.h server.o memory.h memory.o
+			$(CC) server.o memory.o -o server -lpthread -lm
+
+client: client.h client.o memory.h memory.o
+			$(CC) client.o memory.o -o client -lreadline
 
 clean:
-	rm -f *.o
-
-server:
-	./server.o $(PORT)
-
-client:
-	./client.o `hostname` $(PORT)
+	rm -f *.o server client

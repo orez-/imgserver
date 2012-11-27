@@ -87,7 +87,7 @@ int connect_to_host(char *host, int port, char* buffer, int buflen) {
 
     if (connect(newfd, p->ai_addr, p->ai_addrlen) == -1) {
       close(newfd);
-      perror("connect");
+      // perror("connect");
       continue;
     }
 

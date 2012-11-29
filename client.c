@@ -403,7 +403,7 @@ int main(int argc, char **argv) {
     adaptivefd = connect_to_host(arguments.host, l, NULL, 0);
     if (adaptivefd == -1) {
       fprintf(stderr, "failed to connect to adaptive server.\n");
-      global_exit(1);
+      global_exit(2);
     }
     snprintf(linebuf, LINE_SIZE, "%d\n", cid);
     if (send(adaptivefd, linebuf, strlen(linebuf), 0) == -1){
@@ -489,10 +489,10 @@ int main(int argc, char **argv) {
         read = recv(sockfd, filebuf, chunk, 0);
         if (read == -1) {
           perror("recv");
-          global_exit(1);
+          global_exit(3);
         } else if (read == 0) {
           fprintf(stderr,"Server dropped connection.\n");
-          global_exit(1);
+          global_exit(4);
         }
         total += read;
         remain -= read;

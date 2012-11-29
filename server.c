@@ -16,7 +16,6 @@ static int adaptiveport;
 prioritylocks adaptive_d;
 
 static void global_exit(int status);
-static void expectMe();
 static void unexpectMe();
 static void scheduleMe(int cid);
 
@@ -453,7 +452,7 @@ void *executor_thread(void *task) {
           return NULL;
         }
       } else {
-        verbose("Thread-%d: Found file. Transmitting to client.", t->id);
+        verbose("Thread-%d: Found file.", t->id);
         ci->filefd = fileno(ci->file);
         fstat(ci->filefd, &ci->st);
         if (S_ISDIR (ci->st.st_mode)) {
@@ -480,6 +479,7 @@ void *executor_thread(void *task) {
           /* Wait yo turn to transmit file data */
           scheduleMe(t->cid);
         }
+        verbose("Thread-%d: Transmitting to client.", t->id);
         ci->remain = ci->st.st_size;
         ci->offset = 0;
         ssize_t sent;
@@ -539,7 +539,6 @@ static void initialize_adaptive() {
   adaptive_d.num_clients = 0;
   adaptive_d.capacity = 0;
   adaptive_d.released = 0;
-  adaptive_d.returned = 0;
   adaptive_d.next = 0;
   adaptive_d.high_c = 0;
   adaptive_d.med_c = 0;
@@ -568,7 +567,7 @@ static int getClientpriIndById(int cid) {
 static void removeClientpri(int cid) {
   int i = getClientpriIndById(cid);
   if (i == -1) {
-    verbose("Warning: Attempted removal of non-existant client.");
+    verbose("Warning: Attempted removal of non-existant client %d.", cid);
     return;
   }
   if (i < adaptive_d.num_clients - 1) {
@@ -639,37 +638,35 @@ static void updateCutoffs() {
 }
 
 static int sched_checkrelease() {
-  int i, n, release = -1;
-  if (adaptive_d.returned == adaptive_d.released) {
+  int i, n, rc, release = -1;
+  if (adaptive_d.released == 0) {
     /* Oh boy everyone is back lets let the next wave go */
     for (i = 0; i < 3; ++i) {
       switch(adaptive_d.next) {
         case 0:
           n = adaptive_d.high_c;
-          release = 0;
+          rc = 0;
           adaptive_d.high_c = 0;
-          adaptive_d.current = 0;
           break;
         case 1:
           n = adaptive_d.med_c;
-          release = 1;
+          rc = 1;
           adaptive_d.med_c = 0;
-          adaptive_d.current = 1;
           break;
         case 2:
           n = adaptive_d.low_c;
-          release = 2;
+          rc = 2;
           adaptive_d.low_c = 0;
-          adaptive_d.current = 2;
           break;
         default:
           break;
       }
       ++adaptive_d.next;
       if (adaptive_d.next > 2) adaptive_d.next = 0;
-      if (n) {
+      if (n > 0) {
         adaptive_d.released = n;
-        adaptive_d.returned = 0;
+        adaptive_d.current = rc;
+        release = rc;
         break;
       } /* else if n = 0 then nobody in that priority class is waiting, go to next one */
     }
@@ -678,35 +675,28 @@ static int sched_checkrelease() {
 }
 /* END need adaptive_d.lock */
 
-static void expectMe() {
-  pthread_mutex_lock(&(adaptive_d.lock));
-  ++adaptive_d.released;
-  pthread_mutex_unlock(&(adaptive_d.lock));
-}
-
 static void unexpectMe() {
   /* I'm done */
   int release;
   pthread_mutex_lock(&(adaptive_d.lock));
   --adaptive_d.released;
   release = sched_checkrelease();
-  pthread_mutex_unlock(&(adaptive_d.lock));
   /* Release next group */
   switch (release) {
     case 0:
-      verbose("Adaptive: Releasing high priority clients");
+      verbose("Adaptive: Unexpect: Releasing high priority (%d)", adaptive_d.released);
       pthread_mutex_lock(&(adaptive_d.high_l));
       pthread_cond_broadcast(&(adaptive_d.high_n));
       pthread_mutex_unlock(&(adaptive_d.high_l));
       break;
     case 1:
-      verbose("Adaptive: Releasing med priority clients");
+      verbose("Adaptive: Unexpect: Releasing med priority (%d)", adaptive_d.released);
       pthread_mutex_lock(&(adaptive_d.med_l));
       pthread_cond_broadcast(&(adaptive_d.med_n));
       pthread_mutex_unlock(&(adaptive_d.med_l));
       break;
     case 2:
-      verbose("Adaptive: Releasing low priority clients");
+      verbose("Adaptive: Unexpect: Releasing low priority (%d)", adaptive_d.released);
       pthread_mutex_lock(&(adaptive_d.low_l));
       pthread_cond_broadcast(&(adaptive_d.low_n));
       pthread_mutex_unlock(&(adaptive_d.low_l));
@@ -714,6 +704,14 @@ static void unexpectMe() {
     default:
       break;
   }
+  pthread_mutex_unlock(&(adaptive_d.lock));
+}
+
+static int getCurrent() {
+  pthread_mutex_lock(&(adaptive_d.lock));
+  int current = adaptive_d.current;
+  pthread_mutex_unlock(&(adaptive_d.lock));
+  return current;
 }
 
 static void scheduleMe(int cid) {
@@ -722,7 +720,6 @@ static void scheduleMe(int cid) {
   i = getClientpriIndById(cid);
   if (i == -1)
     i = adaptive_d.num_clients; /* lowest priority for clients who have not checked in with adaptive server */
-  // ++adaptive_d.returned; /* Check in */
   
   /* Sorting hat */
   if (i < adaptive_d.high_t) {
@@ -748,24 +745,23 @@ static void scheduleMe(int cid) {
   
   /* Are we all here? */
   release = sched_checkrelease();
-  pthread_mutex_unlock(&(adaptive_d.lock));
   
   /* Release next group */
   switch (release) {
     case 0:
-      verbose("Adaptive: Releasing high priority clients");
+      verbose("Adaptive: Schedule: Releasing high priority (%d)", adaptive_d.released);
       pthread_mutex_lock(&(adaptive_d.high_l));
       pthread_cond_broadcast(&(adaptive_d.high_n));
       pthread_mutex_unlock(&(adaptive_d.high_l));
       break;
     case 1:
-      verbose("Adaptive: Releasing med priority clients");
+      verbose("Adaptive: Schedule: Releasing med priority (%d)", adaptive_d.released);
       pthread_mutex_lock(&(adaptive_d.med_l));
       pthread_cond_broadcast(&(adaptive_d.med_n));
       pthread_mutex_unlock(&(adaptive_d.med_l));
       break;
     case 2:
-      verbose("Adaptive: Releasing low priority clients");
+      verbose("Adaptive: Schedule: Releasing low priority (%d)", adaptive_d.released);
       pthread_mutex_lock(&(adaptive_d.low_l));
       pthread_cond_broadcast(&(adaptive_d.low_n));
       pthread_mutex_unlock(&(adaptive_d.low_l));
@@ -773,9 +769,10 @@ static void scheduleMe(int cid) {
     default:
       break;
   }
+  pthread_mutex_unlock(&(adaptive_d.lock));
   /* Wait for my next turn, or release self if part of next group */
   if (which != release) {
-    while (which != adaptive_d.current) {
+    do {
       switch (which) {
         case 0:
           pthread_mutex_lock(&(adaptive_d.high_l));
@@ -795,13 +792,136 @@ static void scheduleMe(int cid) {
         default:
           break;
       }
-    }
+    } while (which != getCurrent());
   }
+}
+
+adaptive_events adp_inc_evt;
+
+static void shutdown_adaptive_handler(void *arg) {
+  pthread_mutex_unlock(&(adp_inc_evt.lock));
+}
+
+void *adaptive_handler(void *arg) {
+  char buffer[ADP_BUF_SIZE], *p;
+  cli_evt *event;
+  adp_evt_list *head;
+  int epollfd, r, cid, cfd, clean;
+  epollfd = *((int *)arg);
+  pthread_cleanup_push(shutdown_adaptive_handler, NULL);
+  for(;;) {
+    pthread_mutex_lock(&(adp_inc_evt.lock));
+    while (adp_inc_evt.events == NULL) {
+      pthread_cond_wait(&(adp_inc_evt.notify), &(adp_inc_evt.lock));
+    }
+
+    event = adp_inc_evt.events->event;
+    head = adp_inc_evt.events;
+    adp_inc_evt.events = adp_inc_evt.events->next;
+    if (adp_inc_evt.events == NULL) {
+      adp_inc_evt.tail = NULL;
+    }
+    efree(head);
+
+    cid = event->cid;
+    cfd = event->fd;
+
+    clean = 0;
+
+    r = recv(cfd, buffer, ADP_BUF_SIZE-1, 0);
+    do {
+      if (cid == -1) {
+        /* Handshake */
+        if (r == -1) {
+          verbose("Adaptive: recv: %s. Discarding client", strerror(errno));
+          clean = 1;
+          break;
+        } else if (r == 0) {
+          verbose("Adaptive: Client disconnect before sending data");
+          clean = 1;
+          break;
+        }
+        buffer[r] = '\0';
+        if (buffer[r-1] != '\n'){
+          verbose("Adaptive: Client handshake failed. Discarding client");
+          clean = 1;
+          break;
+        }
+        trim_in_place(buffer);
+        errno = 0;
+        cid = (int)strtol(buffer,NULL,0);
+        if (errno == ERANGE) { /* Not a number? or number too big? */
+          verbose("Adaptive: Invalid client handshake. Aborting.");
+          clean = 1;
+          break;
+        }
+        r = send(cfd, "OK\n", 3, 0);
+        if (r == -1) {
+          verbose("Adaptive: Client handshake failed on response. Aborting.");
+          clean = 1;
+          break;
+        }
+        event->cid = cid;
+        pthread_mutex_lock(&(adaptive_d.lock));
+        updateClientpri(cid, 1);
+        updateCutoffs();
+        pthread_mutex_unlock(&(adaptive_d.lock));
+      } else {
+        if (r <= 0) {
+          /* Client disconnect */
+          verbose("Adaptive: Client %d disconnected.", cid);
+          efree(event);
+          clean = 1;
+          pthread_mutex_lock(&(adaptive_d.lock));
+          removeClientpri(cid);
+          updateCutoffs();
+          pthread_mutex_unlock(&(adaptive_d.lock));
+          break;
+        }
+        buffer[r] = '\0';
+        if (buffer[r-1] != '\n') {
+          verbose("Adaptive: Malformed speed update from client %d.", cid);
+          break;
+        }
+        trim_in_place(buffer);
+        /* In case we read multiple updates discard all but last one */
+        p = strrchr(buffer, '\n');
+        if (p != NULL)
+          p++;
+        else
+          p = buffer;
+        verbose("Adaptive: Got update from client %d: %s.", cid, p);
+        errno = 0;
+        r = (int)strtol(p,NULL,0);
+        if (errno == ERANGE) { /* Not a number? or number too big? */
+          verbose("Adaptive: Invalid speed update from client %d.", cid);
+          break;
+        }
+        pthread_mutex_lock(&(adaptive_d.lock));
+        updateClientpri(cid, r);
+        pthread_mutex_unlock(&(adaptive_d.lock));
+      }
+    } while (0);
+    if (clean) {
+      if (epoll_ctl(epollfd, EPOLL_CTL_DEL, cfd, NULL) == -1) {
+        perror("epoll_ctl: client remove");
+        pthread_exit(NULL);
+        return NULL;
+      }
+      close(cfd);
+    }
+    pthread_cond_signal(&(adp_inc_evt.notify));
+    pthread_mutex_unlock(&(adp_inc_evt.lock));
+  }
+  pthread_cleanup_pop(0);
+  pthread_exit(NULL);
 }
 
 static void shutdown_adaptive(void *arg) {
   verbose("Adaptive: Shutting down scheduler...");
-  int epollfd = (int)(*(int *)arg);
+  pthread_cancel(adp_inc_evt.tid);
+  pthread_join(adp_inc_evt.tid, NULL);
+  int epollfd = (*(int *)arg);
   close(epollfd);
 }
 
@@ -811,10 +931,14 @@ void *adaptive_scheduler(void *arg) {
   struct epoll_event ev, events[MAX_EVENTS];
   struct timeval tv;
   int cfd, epollfd, nfds, n, r, cid;
-  char buffer[ADP_BUF_SIZE];
+  cli_evt *newc;
+  adp_evt_list *nevt;
   clilen = sizeof(cli_addr);
   tv.tv_sec = TIMEOUT_SECS;
   tv.tv_usec = 0;
+  adp_inc_evt.events = adp_inc_evt.tail = NULL;
+  pthread_mutex_init(&(adp_inc_evt.lock), NULL);
+  pthread_cond_init(&(adp_inc_evt.notify), NULL);
   
   pthread_cleanup_push(shutdown_adaptive, (void *)&epollfd);
   if ((epollfd = epoll_create(10)) == -1) {
@@ -830,6 +954,12 @@ void *adaptive_scheduler(void *arg) {
     pthread_exit(NULL);
     return NULL;
   }
+
+  if((errno = pthread_create(&(adp_inc_evt.tid), NULL, adaptive_handler, (void *)&epollfd)) != 0) {
+    perror("pthread_create");
+    pthread_exit(NULL);
+    return NULL;
+  } 
   
   for (;;) {
     if ((nfds = epoll_wait(epollfd, events, MAX_EVENTS, -1)) == -1) {
@@ -851,79 +981,31 @@ void *adaptive_scheduler(void *arg) {
           return NULL;
         }
         
-        r = recv(cfd, buffer, ADP_BUF_SIZE-1, 0);
-        if (r == -1) {
-          verbose("Adaptive: recv: %s. Discarding client", strerror(errno));
-          close(cfd);
-          continue;
-        } else if (r == 0) {
-          verbose("Adaptive: Client disconnect before sending data");
-          close(cfd);
-          continue;
-        }
-        buffer[r] = '\0';
-        if (buffer[r-1] != '\n'){
-          verbose("Adaptive: Client handshake failed. Discarding client");
-          close(cfd);
-          continue;
-        }
-        trim_in_place(buffer);
-        errno = 0;
-        cid = (int)strtol(buffer,NULL,0);
-        if (errno == ERANGE) { /* Not a number? or number too big? */
-          verbose("Adaptive: Invalid client handshake. Aborting.");
-          continue;
-        }
-        r = send(cfd, "OK\n", 3, 0);
-        if (r == -1) {
-          verbose("Adaptive: Client handshake failed on response. Aborting.");
-          close(cfd);
-          continue;
-        }
-        pthread_mutex_lock(&(adaptive_d.lock));
-        updateClientpri(cid, 1);
-        updateCutoffs();
-        r = getClientpriIndById(cid);
-        adaptive_d.clients[r].fd = cfd;
-        pthread_mutex_unlock(&(adaptive_d.lock));
+        newc = ALLOC(cli_evt);
+        newc->cid = -1;
+        newc->fd = cfd;
         
         ev.events = EPOLLIN;
-        ev.data.ptr = (void *)&adaptive_d.clients[r];
+        ev.data.ptr = (void *)newc;
         if (epoll_ctl(epollfd, EPOLL_CTL_ADD, cfd, &ev) == -1) {
           perror("epoll_ctl: client");
           pthread_exit(NULL);
           return NULL;
         }
       } else {
-        cid = ((clientpri *)events[n].data.ptr)->cid;
-        cfd = ((clientpri *)events[n].data.ptr)->fd;
-        r = recv(cfd, buffer, ADP_BUF_SIZE-1, 0);
-        if (r <= 0) {
-          /* Client disconnect */
-          verbose("Adaptive: Client %d disconnected.", cid);
-          close(cfd);
-          pthread_mutex_lock(&(adaptive_d.lock));
-          removeClientpri(cid);
-          updateCutoffs();
-          pthread_mutex_unlock(&(adaptive_d.lock));
-          continue;
+        pthread_mutex_lock(&(adp_inc_evt.lock));
+        nevt = ALLOC(adp_evt_list);
+        nevt->event = (cli_evt *)events[n].data.ptr;
+        nevt->next = NULL;
+        if (adp_inc_evt.events) {
+          adp_inc_evt.tail->next = nevt;
+          adp_inc_evt.tail = nevt;
+        } else {
+          adp_inc_evt.events = adp_inc_evt.tail = nevt;
         }
-        buffer[r] = '\0';
-        if (buffer[r-1] != '\n') {
-          verbose("Adaptive: Malformed speed update from client %d.", cid);
-          continue;
-        }
-        trim_in_place(buffer);
-        verbose("Adaptive: Got update from client %d: %s.", cid, buffer);
-        errno = 0;
-        r = (int)strtol(buffer,NULL,0);
-        if (errno == ERANGE) { /* Not a number? or number too big? */
-          verbose("Adaptive: Invalid speed update from client %d.", cid);
-          continue;
-        }
-        pthread_mutex_lock(&(adaptive_d.lock));
-        updateClientpri(cid, r);
-        pthread_mutex_unlock(&(adaptive_d.lock));
+        pthread_cond_signal(&(adp_inc_evt.notify));
+        pthread_cond_wait(&(adp_inc_evt.notify), &(adp_inc_evt.lock));
+        pthread_mutex_unlock(&(adp_inc_evt.lock));
       }
     }
   }

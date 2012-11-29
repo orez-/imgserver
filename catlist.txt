@@ -1,2 +1,4 @@
 cat2.jpg
 cat-teeth.jpg
+cat-1.jpg
+fat-cat.jpg

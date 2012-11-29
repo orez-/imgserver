@@ -25,7 +25,7 @@
 #define BUFFER_SIZE 256
 #define ADP_BUF_SIZE 64
 #define TIMEOUT_SECS 3
-#define MAX_EVENTS 10
+#define MAX_EVENTS 100
 #define CLI_STOR_INCR 40
 #define HIGH_PRI_PCT .2
 #define MED_PRI_PCT .3
@@ -77,7 +77,6 @@ typedef struct _clientinfo {
 typedef struct _clientpri {
   int cid;
   int speed;
-  int fd;
 } clientpri;
 
 typedef struct _prioritylocks {
@@ -88,7 +87,6 @@ typedef struct _prioritylocks {
   int high_t;
   int med_t;
   int released;
-  int returned;
   int next; /* 0 high, 1 med, 2 low */
   int current;
   int high_c;
@@ -101,6 +99,24 @@ typedef struct _prioritylocks {
   pthread_mutex_t low_l;
   pthread_cond_t low_n;
 } prioritylocks;
+
+typedef struct _cli_evt {
+  int cid;
+  int fd;
+} cli_evt;
+
+typedef struct _adp_evt_list {
+  cli_evt *event;
+  struct _adp_evt_list *next;
+} adp_evt_list;
+
+typedef struct _adaptive_events {
+  pthread_t tid;
+  adp_evt_list *events;
+  adp_evt_list *tail;
+  pthread_mutex_t lock;
+  pthread_cond_t notify;
+} adaptive_events;
 
 int executor_init();
 int executor_execute(int socketfd, int cid, char *addr);

@@ -25,7 +25,7 @@
 #define BUFFER_SIZE 256
 #define ADP_BUF_SIZE 64
 #define TIMEOUT_SECS 3
-#define MAX_EVENTS 100
+#define MAX_EVENTS 25
 #define CLI_STOR_INCR 40
 #define HIGH_PRI_PCT .2
 #define MED_PRI_PCT .3

@@ -250,13 +250,12 @@ static struct argp_option options[] = {
   {"batch",     'b', 0, 0, "Runs in batch mode, implies silent" },
   {"file",      'f', "FILE", 0, "Reads commands from FILE. Implies batch. Fails silently on bad argument." },
   {"nooutput",  'n', 0, 0, "Prevents writing to the filesystem" },
-  {"memdebug",  'm', 0, 0, "Print memory debugging messages if compiled with MEM_DEBUG" },
   { 0 }
 };
 
 struct arguments {
   int port;     /* arg1 */
-  int adaptive, verbose, silent, batch, devnull, debug;   /* '-a', '-v', '-m' */
+  int adaptive, verbose, silent, batch, devnull;   /* '-a', '-v', '-m' */
   char *host, *infile;   /* arg2 */
 };
 
@@ -286,9 +285,6 @@ static error_t parse_opt (int key, char *arg, struct argp_state *state) {
     break;
   case 'n':
     arguments->devnull = 1;
-    break;
-  case 'm':
-    arguments->debug = 1;
     break;
 
   case ARGP_KEY_ARG:
@@ -332,7 +328,6 @@ int main(int argc, char **argv) {
   arguments.silent = 0;
   arguments.batch = 0;
   arguments.devnull = 0;
-  arguments.debug = 0;
   arguments.infile = NULL;
   
   argp_parse (&argp, argc, argv, 0, 0, &arguments);
@@ -356,7 +351,6 @@ int main(int argc, char **argv) {
   if (adaptive_f)
     adaptivefd = -1;
   signal(SIGINT, interrupt);
-  start_memory_manager(arguments.debug);
   
   char foldertmp[] = "clientimgXXXXXX";
   char s[INET6_ADDRSTRLEN], *t, *line, linebuf[LINE_SIZE];

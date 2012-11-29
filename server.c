@@ -968,7 +968,6 @@ static void global_exit(int status) {
     pthread_join(adaptive_tid, NULL);
   }
   executor_shutdown();
-  shutdown_memory_manager();
   exit(status);
 }
 
@@ -998,13 +997,12 @@ static struct argp_option options[] = {
   {"adaptive",  'a', 0, 0, "Run in adaptive mode. Connecting clients must also be run in adaptive mode" },
   {"directory", 'd', "DIR", 0, "Serve images from DIR, defaults to imgs/" },
   {"verbose",   'v', 0, 0, "Produce verbose output" },
-  {"memdebug",  'm', 0, 0, "Print memory debugging messages if compiled with MEM_DEBUG" },
   { 0 }
 };
 
 struct arguments {
   int port;             /* arg1 */
-  int adaptive, verbose, debug;   /* '-a', '-v', '-m' */
+  int adaptive, verbose;   /* '-a', '-v', '-m' */
   char *img_dir;        /* directory arg to --directory */
 };
 
@@ -1022,9 +1020,6 @@ static error_t parse_opt (int key, char *arg, struct argp_state *state) {
     break;
   case 'v':
     arguments->verbose = 1;
-    break;
-  case 'm':
-    arguments->debug = 1;
     break;
 
   case ARGP_KEY_ARG:
@@ -1057,7 +1052,6 @@ int main(int argc, char **argv) {
   arguments.img_dir = NULL;
   arguments.adaptive = 0;
   arguments.verbose = 0;
-  arguments.debug = 0;
   
   argp_parse (&argp, argc, argv, 0, 0, &arguments);
   
@@ -1075,7 +1069,6 @@ int main(int argc, char **argv) {
     atid_v = 0;
   }
   signal(SIGINT, interrupt);
-  start_memory_manager(arguments.debug);
   executor_init();
   
   int cfd, cid=1;

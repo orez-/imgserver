@@ -47,10 +47,3 @@ char *estrndup(const char *s, unsigned int length) {
   p[length] = 0;
   return p;
 }
-
-void start_memory_manager(int _verbose) {
-
-}
-void shutdown_memory_manager() {
-
-}

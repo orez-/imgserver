@@ -1,0 +1,1 @@
+for i in {1..100}; do client -an -f catlist.txt `hostname` 5656 & done

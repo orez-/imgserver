@@ -796,149 +796,23 @@ static void scheduleMe(int cid) {
   }
 }
 
-adaptive_events adp_inc_evt;
-
-static void shutdown_adaptive_handler(void *arg) {
-  pthread_mutex_unlock(&(adp_inc_evt.lock));
-}
-
-void *adaptive_handler(void *arg) {
-  char buffer[ADP_BUF_SIZE], *p;
-  cli_evt *event;
-  adp_evt_list *head;
-  int epollfd, r, cid, cfd, clean;
-  epollfd = *((int *)arg);
-  pthread_cleanup_push(shutdown_adaptive_handler, NULL);
-  for(;;) {
-    pthread_mutex_lock(&(adp_inc_evt.lock));
-    while (adp_inc_evt.events == NULL) {
-      pthread_cond_wait(&(adp_inc_evt.notify), &(adp_inc_evt.lock));
-    }
-
-    event = adp_inc_evt.events->event;
-    head = adp_inc_evt.events;
-    adp_inc_evt.events = adp_inc_evt.events->next;
-    if (adp_inc_evt.events == NULL) {
-      adp_inc_evt.tail = NULL;
-    }
-    efree(head);
-
-    cid = event->cid;
-    cfd = event->fd;
-
-    clean = 0;
-
-    r = recv(cfd, buffer, ADP_BUF_SIZE-1, 0);
-    do {
-      if (cid == -1) {
-        /* Handshake */
-        if (r == -1) {
-          verbose("Adaptive: recv: %s. Discarding client", strerror(errno));
-          clean = 1;
-          break;
-        } else if (r == 0) {
-          verbose("Adaptive: Client disconnect before sending data");
-          clean = 1;
-          break;
-        }
-        buffer[r] = '\0';
-        if (buffer[r-1] != '\n'){
-          verbose("Adaptive: Client handshake failed. Discarding client");
-          clean = 1;
-          break;
-        }
-        trim_in_place(buffer);
-        errno = 0;
-        cid = (int)strtol(buffer,NULL,0);
-        if (errno == ERANGE) { /* Not a number? or number too big? */
-          verbose("Adaptive: Invalid client handshake. Aborting.");
-          clean = 1;
-          break;
-        }
-        r = send(cfd, "OK\n", 3, 0);
-        if (r == -1) {
-          verbose("Adaptive: Client handshake failed on response. Aborting.");
-          clean = 1;
-          break;
-        }
-        event->cid = cid;
-        pthread_mutex_lock(&(adaptive_d.lock));
-        updateClientpri(cid, 1);
-        updateCutoffs();
-        pthread_mutex_unlock(&(adaptive_d.lock));
-      } else {
-        if (r <= 0) {
-          /* Client disconnect */
-          verbose("Adaptive: Client %d disconnected.", cid);
-          efree(event);
-          clean = 1;
-          pthread_mutex_lock(&(adaptive_d.lock));
-          removeClientpri(cid);
-          updateCutoffs();
-          pthread_mutex_unlock(&(adaptive_d.lock));
-          break;
-        }
-        buffer[r] = '\0';
-        if (buffer[r-1] != '\n') {
-          verbose("Adaptive: Malformed speed update from client %d.", cid);
-          break;
-        }
-        trim_in_place(buffer);
-        /* In case we read multiple updates discard all but last one */
-        p = strrchr(buffer, '\n');
-        if (p != NULL)
-          p++;
-        else
-          p = buffer;
-        verbose("Adaptive: Got update from client %d: %s.", cid, p);
-        errno = 0;
-        r = (int)strtol(p,NULL,0);
-        if (errno == ERANGE) { /* Not a number? or number too big? */
-          verbose("Adaptive: Invalid speed update from client %d.", cid);
-          break;
-        }
-        pthread_mutex_lock(&(adaptive_d.lock));
-        updateClientpri(cid, r);
-        pthread_mutex_unlock(&(adaptive_d.lock));
-      }
-    } while (0);
-    if (clean) {
-      if (epoll_ctl(epollfd, EPOLL_CTL_DEL, cfd, NULL) == -1) {
-        perror("epoll_ctl: client remove");
-        pthread_exit(NULL);
-        return NULL;
-      }
-      close(cfd);
-    }
-    pthread_cond_signal(&(adp_inc_evt.notify));
-    pthread_mutex_unlock(&(adp_inc_evt.lock));
-  }
-  pthread_cleanup_pop(0);
-  pthread_exit(NULL);
-}
-
 static void shutdown_adaptive(void *arg) {
   verbose("Adaptive: Shutting down scheduler...");
-  pthread_cancel(adp_inc_evt.tid);
-  pthread_join(adp_inc_evt.tid, NULL);
   int epollfd = (*(int *)arg);
   close(epollfd);
 }
 
 void *adaptive_scheduler(void *arg) {
+  char buffer[ADP_BUF_SIZE], *p;
   socklen_t clilen;
   struct sockaddr_storage cli_addr;
   struct epoll_event ev, events[MAX_EVENTS];
   struct timeval tv;
-  int cfd, epollfd, nfds, n, r, cid;
-  cli_evt *newc;
-  adp_evt_list *nevt;
+  int cfd, epollfd, nfds, n, r, cid, clean;
+  cli_evt *event;
   clilen = sizeof(cli_addr);
   tv.tv_sec = TIMEOUT_SECS;
   tv.tv_usec = 0;
-  adp_inc_evt.events = adp_inc_evt.tail = NULL;
-  pthread_mutex_init(&(adp_inc_evt.lock), NULL);
-  pthread_cond_init(&(adp_inc_evt.notify), NULL);
   
   pthread_cleanup_push(shutdown_adaptive, (void *)&epollfd);
   if ((epollfd = epoll_create(10)) == -1) {
@@ -954,12 +828,6 @@ void *adaptive_scheduler(void *arg) {
     pthread_exit(NULL);
     return NULL;
   }
-
-  if((errno = pthread_create(&(adp_inc_evt.tid), NULL, adaptive_handler, (void *)&epollfd)) != 0) {
-    perror("pthread_create");
-    pthread_exit(NULL);
-    return NULL;
-  } 
   
   for (;;) {
     if ((nfds = epoll_wait(epollfd, events, MAX_EVENTS, -1)) == -1) {
@@ -981,31 +849,105 @@ void *adaptive_scheduler(void *arg) {
           return NULL;
         }
         
-        newc = ALLOC(cli_evt);
-        newc->cid = -1;
-        newc->fd = cfd;
+        event = ALLOC(cli_evt);
+        event->cid = -1;
+        event->fd = cfd;
         
         ev.events = EPOLLIN;
-        ev.data.ptr = (void *)newc;
+        ev.data.ptr = (void *)event;
         if (epoll_ctl(epollfd, EPOLL_CTL_ADD, cfd, &ev) == -1) {
           perror("epoll_ctl: client");
           pthread_exit(NULL);
           return NULL;
         }
       } else {
-        pthread_mutex_lock(&(adp_inc_evt.lock));
-        nevt = ALLOC(adp_evt_list);
-        nevt->event = (cli_evt *)events[n].data.ptr;
-        nevt->next = NULL;
-        if (adp_inc_evt.events) {
-          adp_inc_evt.tail->next = nevt;
-          adp_inc_evt.tail = nevt;
-        } else {
-          adp_inc_evt.events = adp_inc_evt.tail = nevt;
+        event = (cli_evt *)events[n].data.ptr;
+        cid = event->cid;
+        cfd = event->fd;
+        clean = 0;
+        
+        r = recv(cfd, buffer, ADP_BUF_SIZE-1, 0);
+        do {
+          if (cid == -1) {
+            /* Handshake */
+            if (r == -1) {
+              verbose("Adaptive: recv: %s. Discarding client", strerror(errno));
+              clean = 1;
+              break;
+            } else if (r == 0) {
+              verbose("Adaptive: Client disconnect before sending data");
+              clean = 1;
+              break;
+            }
+            buffer[r] = '\0';
+            if (buffer[r-1] != '\n'){
+              verbose("Adaptive: Client handshake failed. Discarding client");
+              clean = 1;
+              break;
+            }
+            trim_in_place(buffer);
+            errno = 0;
+            cid = (int)strtol(buffer,NULL,0);
+            if (errno == ERANGE) { /* Not a number? or number too big? */
+              verbose("Adaptive: Invalid client handshake. Aborting.");
+              clean = 1;
+              break;
+            }
+            r = send(cfd, "OK\n", 3, 0);
+            if (r == -1) {
+              verbose("Adaptive: Client handshake failed on response. Aborting.");
+              clean = 1;
+              break;
+            }
+            event->cid = cid;
+            pthread_mutex_lock(&(adaptive_d.lock));
+            updateClientpri(cid, 1);
+            updateCutoffs();
+            pthread_mutex_unlock(&(adaptive_d.lock));
+          } else {
+            if (r <= 0) {
+              /* Client disconnect */
+              verbose("Adaptive: Client %d disconnected.", cid);
+              efree(event);
+              clean = 1;
+              pthread_mutex_lock(&(adaptive_d.lock));
+              removeClientpri(cid);
+              updateCutoffs();
+              pthread_mutex_unlock(&(adaptive_d.lock));
+              break;
+            }
+            buffer[r] = '\0';
+            if (buffer[r-1] != '\n') {
+              verbose("Adaptive: Malformed speed update from client %d.", cid);
+              break;
+            }
+            trim_in_place(buffer);
+            /* In case we read multiple updates discard all but last one */
+            p = strrchr(buffer, '\n');
+            if (p != NULL)
+              p++;
+            else
+              p = buffer;
+            verbose("Adaptive: Got update from client %d: %s.", cid, p);
+            errno = 0;
+            r = (int)strtol(p,NULL,0);
+            if (errno == ERANGE) { /* Not a number? or number too big? */
+              verbose("Adaptive: Invalid speed update from client %d.", cid);
+              break;
+            }
+            pthread_mutex_lock(&(adaptive_d.lock));
+            updateClientpri(cid, r);
+            pthread_mutex_unlock(&(adaptive_d.lock));
+          }
+        } while (0);
+        if (clean) {
+          if (epoll_ctl(epollfd, EPOLL_CTL_DEL, cfd, NULL) == -1) {
+            perror("epoll_ctl: client remove");
+            pthread_exit(NULL);
+            return NULL;
+          }
+          close(cfd);
         }
-        pthread_cond_signal(&(adp_inc_evt.notify));
-        pthread_cond_wait(&(adp_inc_evt.notify), &(adp_inc_evt.lock));
-        pthread_mutex_unlock(&(adp_inc_evt.lock));
       }
     }
   }

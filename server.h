@@ -105,19 +105,6 @@ typedef struct _cli_evt {
   int fd;
 } cli_evt;
 
-typedef struct _adp_evt_list {
-  cli_evt *event;
-  struct _adp_evt_list *next;
-} adp_evt_list;
-
-typedef struct _adaptive_events {
-  pthread_t tid;
-  adp_evt_list *events;
-  adp_evt_list *tail;
-  pthread_mutex_t lock;
-  pthread_cond_t notify;
-} adaptive_events;
-
 int executor_init();
 int executor_execute(int socketfd, int cid, char *addr);
 void executor_shutdown();
